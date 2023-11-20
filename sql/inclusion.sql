@@ -263,7 +263,7 @@ vasoactive_data as(
 ), Sofa AS 
 (
   SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-  sofa.hr AS hour, sofa.starttime AS starttime, sofa.sofa_24hours AS sofa_24_hours
+  sofa.hr AS hour, sofa.starttime AS starttime, sofa.endtime AS endtime, sofa.sofa_24hours AS sofa_24_hours
   FROM inclusion_set AS i_set
   LEFT JOIN `physionet-data.mimiciv_derived.sofa` AS sofa
   ON i_set.stay_id = sofa.stay_id
@@ -272,7 +272,7 @@ vasoactive_data as(
 (
   SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
   kdigo_creatinine.charttime AS charttime, kdigo_creatinine.creat AS kdigo_creat, kdigo_creatinine.creat_low_past_48hr AS kdigo_past_48hr,
-  kdigo_creatinine.creat_low_past_7day AS kdigo_past_7day
+  kdigo_creatinine.creat_low_past_7day AS kdigo_past_7day, DATETIME_DIFF(kdigo_creatinine.charttime, i_set.intime, day) AS charttime_diff
   FROM inclusion_set AS i_set
   LEFT JOIN `physionet-data.mimiciv_derived.kdigo_creatinine` AS kdigo_creatinine 
   ON i_set.hadm_id = kdigo_creatinine.hadm_id AND i_set.stay_id = kdigo_creatinine.stay_id
@@ -280,7 +280,7 @@ vasoactive_data as(
 ), Kdigo_stage AS 
 (
   SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
-  kdigo_stages.charttime AS charttime, kdigo_stages.aki_stage AS aki_stage
+  kdigo_stages.charttime AS charttime, kdigo_stages.aki_stage AS aki_stage, DATETIME_DIFF(kdigo_stages.charttime, i_set.intime, day) AS charttime_diff
   FROM inclusion_set AS i_set
   LEFT JOIN `physionet-data.mimiciv_derived.kdigo_stages` AS kdigo_stages
   ON i_set.subject_id = kdigo_stages.subject_id AND i_set.hadm_id = kdigo_stages.hadm_id AND i_set.stay_id  = kdigo_stages.stay_id
@@ -289,7 +289,7 @@ vasoactive_data as(
 (
   SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
   kdigo_uo.charttime AS charttime, kdigo_uo.weight AS weight, kdigo_uo.urineoutput_6hr AS urineoutput_6hr, kdigo_uo.urineoutput_12hr AS urineoutput_12hr, kdigo_uo.urineoutput_24hr AS urineoutput_24hr, 
-  kdigo_uo.uo_rt_6hr AS uo_rt_6hr, kdigo_uo.uo_rt_12hr AS uo_rt_12hr, kdigo_uo.uo_rt_24hr AS uo_rt_24hr, kdigo_uo.uo_tm_6hr AS uo_tm_6hr, kdigo_uo.uo_tm_12hr AS uo_tm_12hr, kdigo_uo.uo_tm_24hr AS uo_tm_24hr
+  kdigo_uo.uo_rt_6hr AS uo_rt_6hr, kdigo_uo.uo_rt_12hr AS uo_rt_12hr, kdigo_uo.uo_rt_24hr AS uo_rt_24hr, kdigo_uo.uo_tm_6hr AS uo_tm_6hr, kdigo_uo.uo_tm_12hr AS uo_tm_12hr, kdigo_uo.uo_tm_24hr AS uo_tm_24hr, DATETIME_DIFF(kdigo_uo.charttime, i_set.intime, day) AS charttime_diff
   FROM inclusion_set AS i_set
   LEFT JOIN `physionet-data.mimiciv_derived.kdigo_uo` AS kdigo_uo
   ON i_set.stay_id = kdigo_uo.stay_id
@@ -310,7 +310,6 @@ vasoactive_data as(
 
 -- SELECT COUNT (DISTINCT subject_id)
 SELECT *
-FROM vasoactive_data
-  
+FROM Kdigo_stage
 
 
