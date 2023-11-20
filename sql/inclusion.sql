@@ -72,10 +72,89 @@ WITH dx AS -- sub-query diagnosed information about all admitted patient
   ON i_set.stay_id = sepsis3.stay_id
   LEFT JOIN `physionet-data.mimiciv_derived.meld` AS meld
   ON i_set.stay_id = meld.stay_id
+),
+
+crrt_data AS(
+  SELECT DISTINCT i_set.subject_id, i_set.stay_id,
+  DATETIME_DIFF(CRRT.charttime, i_set.intime, DAY) AS crrt_day
+
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.crrt` AS CRRT
+  ON i_set.stay_id = CRRT.stay_id
+),
+
+
+invasive_line_data as(
+  SELECT DISTINCT i_set.subject_id, i_set.stay_id, (case when InvasiveLine.starttime is not null then 1 else 0 end) as invasive_line_label
+  -- , InvasiveLine.starttime, i_set.intime
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.invasive_line` AS InvasiveLine
+  ON i_set.stay_id = InvasiveLine.stay_id
+),
+
+rrt_data AS(
+  SELECT DISTINCT i_set.subject_id, i_set.stay_id,
+  DATETIME_DIFF(RRT.charttime, i_set.intime, DAY) AS rrt_day
+
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.rrt` AS RRT
+  ON i_set.stay_id = RRT.stay_id
+),
+
+ventilation_data as(
+  SELECT DISTINCT i_set.subject_id, i_set.stay_id, (case when Ventilation.starttime is not null then 1 else 0 end) as ventilation_label
+  -- , InvasiveLine.starttime, i_set.intime
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.ventilation` AS Ventilation
+  ON i_set.stay_id = Ventilation.stay_id
+),
+
+sedative_data as(
+  with include_sedative as(
+    SELECT subject_id, stay_id, hadm_id, starttime, endtime, itemid
+    FROM `physionet-data.mimiciv_icu.inputevents`
+    WHERE itemid IN (221668, 225942, 225972, 221744, 222168)
+  )
+  SELECT DISTINCT i_set.subject_id, i_set.stay_id, (case when include_sedative.starttime is not null then 1 else 0 end) as sedative_label
+  FROM inclusion_set AS i_set
+  LEFT JOIN include_sedative
+  ON i_set.stay_id = include_sedative.stay_id and i_set.subject_id = include_sedative.subject_id
+),
+
+antibiotic_data as(
+  SELECT DISTINCT i_set.subject_id, i_set.stay_id, (case when Antibiotic.starttime is not null then 1 else 0 end) as antibiotic_label
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.antibiotic` as Antibiotic
+  ON i_set.stay_id = Antibiotic.stay_id and i_set.subject_id = Antibiotic.subject_id
+),
+
+vasoactive_data as(
+  with norepinephrine_equivalent_dose as(
+    SELECT DISTINCT stay_id, (case when norepinephrine_equivalent_dose is not null then 1 else 0 end) as norepinephrine_equivalent_dose_label
+    FROM `physionet-data.mimiciv_derived.norepinephrine_equivalent_dose`
+  )
+
+  SELECT DISTINCT i_set.subject_id, i_set.stay_id, 
+  (case when dobutamine is not null then 1 else 0 end) as dobutamine_label,
+  (case when dopamine is not null then 1 else 0 end) as dopamine_label,
+  (case when epinephrine is not null then 1 else 0 end) as epinephrine_label,
+  (case when milrinone is not null then 1 else 0 end) as milrinone_label,
+  (case when norepinephrine is not null then 1 else 0 end) as norepinephrine_label,
+  (case when norepinephrine_equivalent_dose is not null then 1 else 0 end) as norepinephrine_equivalent_dose_label,
+  (case when phenylephrine is not null then 1 else 0 end) as phenylephrine_label,
+  (case when vasopressin is not null then 1 else 0 end) as vasopressin_label
+  
+
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.vasoactive_agent` as Vasoactive
+  ON i_set.stay_id = Vasoactive.stay_id 
+  LEFT JOIN physionet-data.mimiciv_derived.norepinephrine_equivalent_dose as Norepinephrine_equivalent_dose
+  ON i_set.stay_id = Norepinephrine_equivalent_dose.stay_id 
 )
 
-SELECT * 
-FROM baseline_level_2
+-- SELECT COUNT (DISTINCT subject_id)
+SELECT *
+FROM vasoactive_data
   
 
 
