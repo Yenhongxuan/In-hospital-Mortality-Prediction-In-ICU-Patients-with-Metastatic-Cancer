@@ -29,15 +29,20 @@ WITH dx AS -- sub-query diagnosed information about all admitted patient
 ), icd_9_10 AS --Get index of metastatic cancer for each icu patient
 (
   SELECT 
-    icu_stays.subject_id AS subject_id, icu_stays.hadm_id AS hadm_id, icu_stays.stay_id AS stay_id, icu_stays.intime AS intime
+    icu_stays.subject_id AS subject_id, icu_stays.hadm_id AS hadm_id, icu_stays.stay_id AS stay_id, icu_stays.icu_intime AS intime, icu_stays.icu_outtime AS outtime, icu_stays.dod AS dod, icu_stays.hospital_expire_flag AS label_hosp
     , GREATEST(COALESCE(icd9.advanced_cancer, 0), COALESCE(icd10.advanced_cancer, 0)) AS advanced_cancer
-    , GREATEST(COALESCE(icd9.hematologic_malignancy, 0), COALESCE(icd10.hematologic_malignancy, 0)) AS hematologic_malignancy
-  FROM `physionet-data.mimiciv_icu.icustays` AS icu_stays
+    , GREATEST(COALESCE(icd9.hematologic_malignancy, 0), COALESCE(icd10.hematologic_malignancy, 0)) AS hematologic_malignancy, 
+    CASE
+      WHEN icu_stays.dod < icu_stays.icu_outtime THEN 1
+      ELSE 0
+    END AS label_icu
+  FROM `physionet-data.mimiciv_derived.icustay_detail` AS icu_stays
   LEFT JOIN icd9 ON icu_stays.subject_id = icd9.subject_id
   LEFT JOIN icd10 ON icu_stays.subject_id = icd10.subject_id
 ), inclusion_set AS --Pick patient of metastatic cancer and age between 18 and 89, and return subject_id, hadm_id, stay_id, and intime of ICU
 (
-  SELECT i_9_10.subject_id AS subject_id, i_9_10.hadm_id AS hadm_id, i_9_10.stay_id AS stay_id, i_9_10.intime AS intime
+  SELECT i_9_10.subject_id AS subject_id, i_9_10.hadm_id AS hadm_id, i_9_10.stay_id AS stay_id, i_9_10.intime AS intime, i_9_10.outtime AS outtime, 
+  i_9_10.dod AS dod, i_9_10.label_hosp AS label_hosp, i_9_10.label_icu AS label_icu
   FROM icd_9_10 AS i_9_10
   INNER JOIN `physionet-data.mimiciv_hosp.patients` AS patients ON i_9_10.subject_id = patients.subject_id
   WHERE patients.anchor_age >= 18 
@@ -221,7 +226,8 @@ vasoactive_data as(
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
   )
 
-  SELECT *
+  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    m_p.value AS value, m_p.charttime AS charttime, m_p.label AS label  
   FROM inclusion_set AS i_set
   LEFT JOIN Manual_blood_pressure_part AS m_p
   ON i_set.subject_id = m_p.subject_id AND i_set.hadm_id = m_p.hadm_id AND i_set.stay_id = m_p.stay_id
@@ -342,5 +348,5 @@ vasoactive_data as(
 
 -- SELECT COUNT (DISTINCT subject_id)
 SELECT *
-FROM Heart_Rate
+FROM inclusion_set
 
