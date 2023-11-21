@@ -152,48 +152,80 @@ vasoactive_data as(
   ON i_set.stay_id = Norepinephrine_equivalent_dose.stay_id 
 ), Heart_Rate AS
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-  chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+  With Heart_Rate_part AS   
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    FROM inclusion_set AS i_set
+    LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220045
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  )
+  SELECT *
   FROM inclusion_set AS i_set
-  LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
-  ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
-  LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items
-  ON chartevents.itemid = d_items.itemid
-  WHERE chartevents.itemid = 220045
-  ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  LEFT JOIN Heart_Rate_part AS h_p
+  ON i_set.subject_id = h_p.subject_id AND i_set.hadm_id = h_p.hadm_id AND i_set.stay_id = h_p.stay_id
+  
 ), Arterial_blood_pressure AS 
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
-  chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+  WITH Arterial_blood_pressure_part AS   
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
+    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    FROM inclusion_set AS i_set
+    LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220050 OR chartevents.itemid = 220051 OR chartevents.itemid = 220052
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  )
+  SELECT *
   FROM inclusion_set AS i_set
-  LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
-  ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
-  LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
-  ON chartevents.itemid = d_items.itemid
-  WHERE chartevents.itemid = 220050 OR chartevents.itemid = 220051 OR chartevents.itemid = 220052
-  ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  LEFT JOIN Arterial_blood_pressure_part AS a_p
+  ON i_set.subject_id = a_p.subject_id AND i_set.hadm_id = a_p.hadm_id AND i_set.stay_id = a_p.stay_id
 ), Non_invasive_blood_pressure AS
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-  chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+  WITH Non_invasive_blood_pressure_part AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    FROM inclusion_set AS i_set
+    LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220179 OR chartevents.itemid = 220180 OR chartevents.itemid = 220181
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  )
+  SELECT *
   FROM inclusion_set AS i_set
-  LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
-  ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
-  LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
-  ON chartevents.itemid = d_items.itemid
-  WHERE chartevents.itemid = 220179 OR chartevents.itemid = 220180 OR chartevents.itemid = 220181
-  ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  LEFT JOIN Non_invasive_blood_pressure_part AS n_p
+  ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
+  
 ), Manual_blood_pressure AS 
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-  chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+  WITH Manual_blood_pressure_part AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    FROM inclusion_set AS i_set
+    LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents 
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 224167 OR chartevents.itemid = 224643 OR chartevents.itemid = 227243 OR chartevents.itemid = 227242
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  )
+
+  SELECT *
   FROM inclusion_set AS i_set
-  LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents 
-  ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
-  LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items
-  ON chartevents.itemid = d_items.itemid
-  WHERE chartevents.itemid = 224167 OR chartevents.itemid = 224643 OR chartevents.itemid = 227243 OR chartevents.itemid = 227242
-  ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  LEFT JOIN Manual_blood_pressure_part AS m_p
+  ON i_set.subject_id = m_p.subject_id AND i_set.hadm_id = m_p.hadm_id AND i_set.stay_id = m_p.stay_id
+
 ), Respiratory_rate AS  
 (
   SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
@@ -310,6 +342,5 @@ vasoactive_data as(
 
 -- SELECT COUNT (DISTINCT subject_id)
 SELECT *
-FROM Kdigo_stage
-
+FROM Heart_Rate
 
