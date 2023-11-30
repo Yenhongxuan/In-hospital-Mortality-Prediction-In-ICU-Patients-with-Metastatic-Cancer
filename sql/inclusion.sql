@@ -29,7 +29,8 @@ WITH dx AS -- sub-query diagnosed information about all admitted patient
 ), icd_9_10 AS --Get index of metastatic cancer for each icu patient
 (
   SELECT 
-    icu_stays.subject_id AS subject_id, icu_stays.hadm_id AS hadm_id, icu_stays.stay_id AS stay_id, icu_stays.icu_intime AS intime, icu_stays.icu_outtime AS outtime, icu_stays.dod AS dod, icu_stays.hospital_expire_flag AS label_hosp
+    icu_stays.subject_id AS subject_id, icu_stays.hadm_id AS hadm_id, icu_stays.stay_id AS stay_id, 
+    icu_stays.icu_intime AS intime, icu_stays.icu_outtime AS outtime, icu_stays,dischtime AS dischtime, icu_stays.dod AS dod, icu_stays.hospital_expire_flag AS label_hosp
     , GREATEST(COALESCE(icd9.advanced_cancer, 0), COALESCE(icd10.advanced_cancer, 0)) AS advanced_cancer
     , GREATEST(COALESCE(icd9.hematologic_malignancy, 0), COALESCE(icd10.hematologic_malignancy, 0)) AS hematologic_malignancy, 
     CASE
@@ -41,7 +42,7 @@ WITH dx AS -- sub-query diagnosed information about all admitted patient
   LEFT JOIN icd10 ON icu_stays.subject_id = icd10.subject_id
 ), inclusion_set AS --Pick patient of metastatic cancer and age between 18 and 89, and return subject_id, hadm_id, stay_id, and intime of ICU
 (
-  SELECT i_9_10.subject_id AS subject_id, i_9_10.hadm_id AS hadm_id, i_9_10.stay_id AS stay_id, i_9_10.intime AS intime, i_9_10.outtime AS outtime, 
+  SELECT i_9_10.subject_id AS subject_id, i_9_10.hadm_id AS hadm_id, i_9_10.stay_id AS stay_id, i_9_10.intime AS intime, i_9_10.outtime AS outtime, i_9_10.dischtime AS dischtime,
   i_9_10.dod AS dod, i_9_10.label_hosp AS label_hosp, i_9_10.label_icu AS label_icu
   FROM icd_9_10 AS i_9_10
   INNER JOIN `physionet-data.mimiciv_hosp.patients` AS patients ON i_9_10.subject_id = patients.subject_id
@@ -193,7 +194,7 @@ vasoactive_data as(
   With Heart_Rate_part AS   
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -201,58 +202,204 @@ vasoactive_data as(
     ON chartevents.itemid = d_items.itemid
     WHERE chartevents.itemid = 220045
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
-  )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    h_p.value AS value, h_p.charttime AS charttime, h_p.label AS chartevent_name
-  FROM inclusion_set AS i_set
-  LEFT JOIN Heart_Rate_part AS h_p
-  ON i_set.subject_id = h_p.subject_id AND i_set.hadm_id = h_p.hadm_id AND i_set.stay_id = h_p.stay_id
-  
-), Arterial_blood_pressure AS 
-(
-  WITH Arterial_blood_pressure_part AS   
+  ), Heart_Rate_raw AS   
   (
-    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime AS outtime, i_set.dod AS dod, h_p.value AS value, h_p.charttime AS charttime, 
+     DATETIME_DIFF(h_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, h_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, h_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, h_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(h_p.charttime, i_set.intime, HOUR) ORDER BY h_p.charttime ASC) AS icu_timestep_rank
     FROM inclusion_set AS i_set
-    LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
-    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
-    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
-    ON chartevents.itemid = d_items.itemid
-    WHERE chartevents.itemid = 220050 OR chartevents.itemid = 220051 OR chartevents.itemid = 220052
-    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+    LEFT JOIN Heart_Rate_part AS h_p
+    ON i_set.subject_id = h_p.subject_id AND i_set.hadm_id = h_p.hadm_id AND i_set.stay_id = h_p.stay_id
   )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
-    a_p.value AS value, a_p.charttime AS charttime, a_p.label AS chartevent_name
-  FROM inclusion_set AS i_set
-  LEFT JOIN Arterial_blood_pressure_part AS a_p
-  ON i_set.subject_id = a_p.subject_id AND i_set.hadm_id = a_p.hadm_id AND i_set.stay_id = a_p.stay_id
-), Non_invasive_blood_pressure AS
+  SELECT *
+  FROM Heart_Rate_raw
+  WHERE Heart_Rate_raw.icu_timestep_rank = 1
+  ORDER BY Heart_Rate_raw.stay_id, Heart_Rate_raw.charttime
+
+),Arterial_blood_pressure_sbp AS
 (
-  WITH Non_invasive_blood_pressure_part AS
+  WITH Arterial_blood_pressure_part AS
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime
     FROM inclusion_set AS i_set
     LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
     LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
     ON chartevents.itemid = d_items.itemid
-    WHERE chartevents.itemid = 220179 OR chartevents.itemid = 220180 OR chartevents.itemid = 220181
+    WHERE chartevents.itemid = 220050
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  ), Arterial_blood_pressure_raw AS    
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime, i_set.dod, n_p.value AS value, n_p.charttime AS charttime, 
+    DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, n_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, n_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, n_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) ORDER BY n_p.charttime ASC) AS icu_timestep_rank
+
+    FROM inclusion_set AS i_set
+    LEFT JOIN Arterial_blood_pressure_part AS n_p
+    ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
   )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    n_p.value AS value, n_p.charttime AS charttime, n_p.label AS chartevent_name
-  FROM inclusion_set AS i_set
-  LEFT JOIN Non_invasive_blood_pressure_part AS n_p
-  ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
+  SELECT *
+  FROM Arterial_blood_pressure_raw
+  WHERE Arterial_blood_pressure_raw.icu_timestep_rank = 1
+  ORDER BY Arterial_blood_pressure_raw.stay_id, Arterial_blood_pressure_raw.charttime
   
-), Manual_blood_pressure AS 
+), 
+Arterial_blood_pressure_dbp AS
+(
+  WITH Arterial_blood_pressure_part AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.valuenum AS value, chartevents.charttime AS charttime
+    FROM inclusion_set AS i_set
+    LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220051
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  ), Arterial_blood_pressure_raw AS    
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime, i_set.dod, n_p.value AS value, n_p.charttime AS charttime, 
+    DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, n_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, n_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, n_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) ORDER BY n_p.charttime ASC) AS icu_timestep_rank
+
+    FROM inclusion_set AS i_set
+    LEFT JOIN Arterial_blood_pressure_part AS n_p
+    ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
+  )
+  SELECT *
+  FROM Arterial_blood_pressure_raw
+  WHERE Arterial_blood_pressure_raw.icu_timestep_rank = 1
+  ORDER BY Arterial_blood_pressure_raw.stay_id, Arterial_blood_pressure_raw.charttime
+  
+), 
+Arterial_blood_pressure_mbp AS
+(
+  WITH Arterial_blood_pressure_part AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.valuenum AS value, chartevents.charttime AS charttime
+    FROM inclusion_set AS i_set
+    LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220052
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  ), Arterial_blood_pressure_raw AS    
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime, i_set.dod, n_p.value AS value, n_p.charttime AS charttime, 
+    DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, n_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, n_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, n_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) ORDER BY n_p.charttime ASC) AS icu_timestep_rank
+
+    FROM inclusion_set AS i_set
+    LEFT JOIN Arterial_blood_pressure_part AS n_p
+    ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
+  )
+  SELECT *
+  FROM Arterial_blood_pressure_raw
+  WHERE Arterial_blood_pressure_raw.icu_timestep_rank = 1
+  ORDER BY Arterial_blood_pressure_raw.stay_id, Arterial_blood_pressure_raw.charttime
+  
+), 
+
+Non_invasive_blood_pressure_sbp AS
+(
+  WITH Non_invasive_blood_pressure_part AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.valuenum AS value, chartevents.charttime AS charttime
+    FROM inclusion_set AS i_set
+    LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220179
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  ), Non_invasive_blood_pressure_raw AS    
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime, i_set.dod, n_p.value AS value, n_p.charttime AS charttime, 
+    DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, n_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, n_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, n_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) ORDER BY n_p.charttime ASC) AS icu_timestep_rank
+
+    FROM inclusion_set AS i_set
+    LEFT JOIN Non_invasive_blood_pressure_part AS n_p
+    ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
+  )
+  SELECT *
+  FROM Non_invasive_blood_pressure_raw
+  WHERE Non_invasive_blood_pressure_raw.icu_timestep_rank = 1
+  ORDER BY Non_invasive_blood_pressure_raw.stay_id, Non_invasive_blood_pressure_raw.charttime
+  
+)
+
+
+, Non_invasive_blood_pressure_dbp AS
+(
+  WITH Non_invasive_blood_pressure_part AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.valuenum AS value, chartevents.charttime AS charttime
+    FROM inclusion_set AS i_set
+    LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220180
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  ), Non_invasive_blood_pressure_raw AS    
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime, i_set.dod, n_p.value AS value, n_p.charttime AS charttime, 
+    DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, n_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, n_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, n_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) ORDER BY n_p.charttime ASC) AS icu_timestep_rank
+
+    FROM inclusion_set AS i_set
+    LEFT JOIN Non_invasive_blood_pressure_part AS n_p
+    ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
+  )
+  SELECT *
+  FROM Non_invasive_blood_pressure_raw
+  WHERE Non_invasive_blood_pressure_raw.icu_timestep_rank = 1
+  ORDER BY Non_invasive_blood_pressure_raw.stay_id, Non_invasive_blood_pressure_raw.charttime
+  
+)
+
+
+
+, Non_invasive_blood_pressure_mbp AS
+(
+  WITH Non_invasive_blood_pressure_part AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+    chartevents.valuenum AS value, chartevents.charttime AS charttime
+    FROM inclusion_set AS i_set
+    LEFT Join `physionet-data.mimiciv_icu.chartevents` AS chartevents 
+    ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
+    LEFT JOIN `physionet-data.mimiciv_icu.d_items` AS d_items 
+    ON chartevents.itemid = d_items.itemid
+    WHERE chartevents.itemid = 220181
+    ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  ), Non_invasive_blood_pressure_raw AS    
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime, i_set.dod, n_p.value AS value, n_p.charttime AS charttime, 
+    DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, n_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, n_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, n_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(n_p.charttime, i_set.intime, HOUR) ORDER BY n_p.charttime ASC) AS icu_timestep_rank
+
+    FROM inclusion_set AS i_set
+    LEFT JOIN Non_invasive_blood_pressure_part AS n_p
+    ON i_set.subject_id = n_p.subject_id AND i_set.hadm_id = n_p.hadm_id AND i_set.stay_id = n_p.stay_id
+  )
+  SELECT *
+  FROM Non_invasive_blood_pressure_raw
+  WHERE Non_invasive_blood_pressure_raw.icu_timestep_rank = 1
+  ORDER BY Non_invasive_blood_pressure_raw.stay_id, Non_invasive_blood_pressure_raw.charttime
+  
+)
+
+
+
+
+
+, Manual_blood_pressure AS 
 (
   WITH Manual_blood_pressure_part AS
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents 
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -273,7 +420,7 @@ vasoactive_data as(
   WITH Respiratory_rate_part AS 
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents 
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -281,12 +428,19 @@ vasoactive_data as(
     ON chartevents.itemid = d_items.itemid
     WHERE chartevents.itemid = 220210 
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
-  )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    r_p.value AS value, r_p.charttime AS charttime, r_p.label AS chartevent_name
+  ), Respiratory_rate_raw AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.dod AS dod, r_p.value AS value, r_p.charttime AS charttime,  
+    DATETIME_DIFF(r_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, r_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, r_p.charttime, HOUR) AS hosp_timestap_back, DATETIME_DIFF(i_set.dod, r_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(r_p.charttime, i_set.intime, HOUR) ORDER BY r_p.charttime ASC) AS icu_timestep_rank
   FROM inclusion_set AS i_set
   LEFT JOIN Respiratory_rate_part AS r_p  
   ON i_set.subject_id = r_p.subject_id AND i_set.hadm_id = r_p.hadm_id AND i_set.stay_id = r_p.stay_id
+  )
+  
+  SELECT *
+  FROM Respiratory_rate_raw
+  WHERE Respiratory_rate_raw.icu_timestep_rank = 1
+  ORDER BY Respiratory_rate_raw.stay_id, Respiratory_rate_raw.charttime
 
   
 ), Respiratory_rate_total AS   
@@ -295,7 +449,7 @@ vasoactive_data as(
   WITH Respiratory_rate_total_part AS 
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents 
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -304,19 +458,20 @@ vasoactive_data as(
     WHERE chartevents.itemid = 224690 
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
   )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
+  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime AS outtime, 
     r_p.value AS value, r_p.charttime AS charttime, r_p.label AS chartevent_name
   FROM inclusion_set AS i_set
   LEFT JOIN Respiratory_rate_total_part AS r_p
   ON i_set.subject_id = r_p.subject_id AND i_set.hadm_id = r_p.hadm_id AND i_set.stay_id = r_p.stay_id
 
   
-), Temperature_celsius AS   
+), Temperature_Celsius AS 
 (
-  WITH Temperature_celsius_part AS 
+
+  WITH Temperature_Celsius_part AS 
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -324,14 +479,18 @@ vasoactive_data as(
     ON chartevents.itemid = d_items.itemid
     WHERE chartevents.itemid = 223762
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
-  )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    t_p.value AS value, t_p.charttime AS charttime, t_p.label AS chartevent_name
+  ), Temperature_Celsius_raw AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, t_p.value AS value, t_p.charttime AS charttime,
+    DATETIME_DIFF(t_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, t_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, t_p.charttime, HOUR) AS hosp_timestap_back, DATETIME_DIFF(i_set.dod, t_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(t_p.charttime, i_set.intime, HOUR) ORDER BY t_p.charttime ASC) AS icu_timestep_rank
   FROM inclusion_set AS i_set
-  LEFT JOIN Temperature_celsius_part AS t_p
+  LEFT JOIN Temperature_Celsius_part AS t_p
   ON i_set.subject_id = t_p.subject_id AND i_set.hadm_id = t_p.hadm_id AND i_set.stay_id = t_p.stay_id
-
-
+  )
+  SELECT * 
+  FROM Temperature_Celsius_raw
+  WHERE Temperature_Celsius_raw.icu_timestep_rank = 1
+  ORDER BY Temperature_Celsius_raw.stay_id, Temperature_Celsius_raw.charttime
   
 ), Temperature_fahrenheit AS 
 (
@@ -339,7 +498,7 @@ vasoactive_data as(
   WITH Temperature_fahrenheit_part AS 
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -347,19 +506,25 @@ vasoactive_data as(
     ON chartevents.itemid = d_items.itemid
     WHERE chartevents.itemid = 223761
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
-  )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    t_p.value AS value, t_p.charttime AS charttime, t_p.label AS chartevent_name
+  ), Temperature_fahrenheit_raw AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, t_p.value AS value, t_p.charttime AS charttime,
+    DATETIME_DIFF(t_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, t_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, t_p.charttime, HOUR) AS hosp_timestap_back, DATETIME_DIFF(i_set.dod, t_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(t_p.charttime, i_set.intime, HOUR) ORDER BY t_p.charttime ASC) AS icu_timestep_rank
   FROM inclusion_set AS i_set
   LEFT JOIN Temperature_fahrenheit_part AS t_p
   ON i_set.subject_id = t_p.subject_id AND i_set.hadm_id = t_p.hadm_id AND i_set.stay_id = t_p.stay_id
+  )
+  SELECT * 
+  FROM Temperature_fahrenheit_raw
+  WHERE Temperature_fahrenheit_raw.icu_timestep_rank = 1
+  ORDER BY Temperature_fahrenheit_raw.stay_id, Temperature_fahrenheit_raw.charttime
   
 ), SpO2 AS
 (
   With SpO2_part AS 
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -378,7 +543,7 @@ vasoactive_data as(
   WITH Glucose_part AS 
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    chartevents.value AS value, chartevents.charttime AS charttime, d_items.label AS label
+    chartevents.valuenum AS value, chartevents.charttime AS charttime, d_items.label AS label
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_icu.chartevents` AS chartevents
     ON i_set.subject_id = chartevents.subject_id AND i_set.hadm_id = chartevents.hadm_id AND i_set.stay_id = chartevents.stay_id
@@ -386,20 +551,35 @@ vasoactive_data as(
     ON chartevents.itemid = d_items.itemid
     WHERE chartevents.itemid = 220621
     ORDER BY i_set.subject_id, i_set.intime, chartevents.charttime, chartevents.itemid
+  ), Glucose_raw AS   
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, g_p.value AS value, g_p.charttime AS charttime,
+    DATETIME_DIFF(g_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, g_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, g_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, g_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(g_p.charttime, i_set.intime, HOUR) ORDER BY g_p.charttime ASC) AS icu_timestep_rank
+    FROM inclusion_set AS i_set
+    LEFT JOIN Glucose_part AS g_p
+    ON i_set.subject_id = g_p.subject_id AND i_set.hadm_id = g_p.hadm_id AND i_set.stay_id = g_p.stay_id
   )
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-    g_p.value AS value, g_p.charttime AS charttime, g_p.label AS chartevent_name
-  FROM inclusion_set AS i_set
-  LEFT JOIN Glucose_part AS g_p
-  ON i_set.subject_id = g_p.subject_id AND i_set.hadm_id = g_p.hadm_id AND i_set.stay_id = g_p.stay_id
+  SELECT * 
+  FROM Glucose_raw
+  WHERE Glucose_raw.icu_timestep_rank = 1
+  ORDER BY Glucose_raw.stay_id, Glucose_raw.charttime
+  
 ), Sofa AS 
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, 
-  sofa.hr AS hour, sofa.starttime AS starttime, sofa.endtime AS endtime, sofa.sofa_24hours AS sofa_24_hours, i_set.label_hosp AS label_hosp, i_set.label_icu AS label_icu
-  FROM inclusion_set AS i_set
-  LEFT JOIN `physionet-data.mimiciv_derived.sofa` AS sofa
-  ON i_set.stay_id = sofa.stay_id
-  ORDER BY i_set.subject_id, i_set.intime, sofa.hr
+  WITH Sofa_raw AS 
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, sofa.sofa_24hours AS sofa, sofa.endtime AS charttime, 
+    DATETIME_DIFF(sofa.starttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, sofa.starttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, sofa.starttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, sofa.starttime, HOUR) AS death_timestep, 
+  i_set.label_hosp AS label_hosp, i_set.label_icu AS label_icu, 
+  RANK () OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(sofa.starttime, i_set.intime, HOUR) ORDER BY sofa.starttime ASC) AS icu_timestep_rank
+    FROM inclusion_set AS i_set
+    LEFT JOIN `physionet-data.mimiciv_derived.sofa` AS sofa
+    ON i_set.stay_id = sofa.stay_id
+  )
+  SELECT * 
+  FROM Sofa_raw
+  WHERE Sofa_raw.icu_timestep_rank = 1
+  ORDER BY Sofa_raw.stay_id, Sofa_raw.charttime
 ), Kdigo_creatinine AS 
 (
   SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
@@ -438,11 +618,47 @@ vasoactive_data as(
   FROM inclusion_set AS i_set
   LEFT JOIN `physionet-data.mimiciv_derived.apsiii` AS apsiii
   ON i_set.subject_id = apsiii.subject_id AND i_set.hadm_id = apsiii.hadm_id AND i_set.stay_id = apsiii.stay_id
+), vitalsign AS
+(
+  SELECT HR.subject_id AS subject_id, HR.hadm_id AS hadm_id, HR.stay_id AS stay_id, HR.icu_timestep AS icu_timestep, HR.icu_timestep_back AS icu_timestep_back, HR.hosp_timestep_back AS hosp_timestep_back, HR.death_timestep AS death_timestep,
+  HR.value AS Heart_rate, 
+  CASE
+    WHEN (NISBP.value IS NULL AND ASBP.value IS NOT NULL) THEN ASBP.value
+    ELSE NISBP.value
+  END AS NI_SBP, 
+  CASE
+    WHEN (NIDBP.value IS NULL AND ADBP.value IS NOT NULL) THEN ADBP.value
+    ELSE NIDBP.value
+  END AS NI_DBP, 
+  CASE
+    WHEN (NIMBP.value IS NULL AND AMBP.value IS NOT NULL) THEN AMBP.value
+    ELSE NIMBP.value
+  END AS NI_MBP, ASBP.value AS A_SBP, ADBP.value AS A_DBP, AMBP.value AS A_MBP,
+  G.value AS Glucose, 
+  TF.value AS tempture_F, 
+  CASE
+    WHEN (TC.value IS NULL AND TF.value IS NOT NULL) THEN (TF.value - 32) * 5 / 9
+    ELSE TC.value
+  END AS tempture_C, sofa.sofa
+  
+  FROM Heart_Rate AS HR
+  LEFT JOIN Non_invasive_blood_pressure_sbp AS NISBP ON HR.stay_id = NISBP.stay_id AND HR.icu_timestep = NISBP.icu_timestep
+  LEFT JOIN Non_invasive_blood_pressure_dbp AS NIDBP ON HR.stay_id = NIDBP.stay_id AND HR.icu_timestep = NIDBP.icu_timestep
+  LEFT JOIN Non_invasive_blood_pressure_mbp AS NIMBP ON HR.stay_id = NIMBP.stay_id AND HR.icu_timestep = NIMBP.icu_timestep
+  LEFT JOIN Respiratory_rate AS RR ON HR.stay_id = RR.stay_id AND HR.icu_timestep = RR.icu_timestep
+  LEFT JOIN Glucose AS G ON HR.stay_id = G.stay_id AND HR.icu_timestep = G.icu_timestep
+  LEFT JOIN Temperature_fahrenheit AS TF ON HR.stay_id = TF.stay_id AND HR.icu_timestep = TF.icu_timestep
+  LEFT JOIN Temperature_Celsius AS TC ON HR.stay_id = TC.stay_id AND HR.icu_timestep = TC.icu_timestep
+  LEFT JOIN Arterial_blood_pressure_sbp AS ASBP ON HR.stay_id = ASBP.stay_id AND HR.icu_timestep = ASBP.icu_timestep
+  LEFT JOIN Arterial_blood_pressure_dbp AS ADBP ON HR.stay_id = ADBP.stay_id AND HR.icu_timestep = ADBP.icu_timestep
+  LEFT JOIN Arterial_blood_pressure_mbp AS AMBP ON HR.stay_id = AMBP.stay_id AND HR.icu_timestep = AMBP.icu_timestep
+  LEFT JOIN Sofa AS sofa ON HR.stay_id = sofa.stay_id AND HR.icu_timestep = sofa.icu_timestep
+  ORDER BY HR.stay_id, HR.charttime
 )
 
 -- SELECT COUNT (DISTINCT subject_id)
-SELECT DISTINCT stay_id
-FROM SpO2
-WHERE value is NULL
+SELECT *
+FROM vitalsign
+
 
 
