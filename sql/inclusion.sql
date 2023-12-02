@@ -43,7 +43,8 @@ WITH dx AS -- sub-query diagnosed information about all admitted patient
 ), inclusion_set AS --Pick patient of metastatic cancer and age between 18 and 89, and return subject_id, hadm_id, stay_id, and intime of ICU
 (
   SELECT i_9_10.subject_id AS subject_id, i_9_10.hadm_id AS hadm_id, i_9_10.stay_id AS stay_id, i_9_10.intime AS intime, i_9_10.outtime AS outtime, i_9_10.dischtime AS dischtime,
-  i_9_10.dod AS dod, i_9_10.label_hosp AS label_hosp, i_9_10.label_icu AS label_icu
+  i_9_10.dod AS dod, i_9_10.label_hosp AS label_hosp, i_9_10.label_icu AS label_icu, 
+  DATETIME_DIFF(i_9_10.outtime, i_9_10.intime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_9_10.dischtime, i_9_10.intime, HOUR) AS hosp_timestep_back
   FROM icd_9_10 AS i_9_10
   INNER JOIN `physionet-data.mimiciv_hosp.patients` AS patients ON i_9_10.subject_id = patients.subject_id
   WHERE patients.anchor_age >= 18 
@@ -52,8 +53,7 @@ WITH dx AS -- sub-query diagnosed information about all admitted patient
   ORDER BY i_9_10.subject_id, i_9_10.intime
 ), baseline_level_1 AS 
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, Age.age AS Age, i_set.label_hosp AS label_hosp, i_set.label_icu AS label_icu, 
-  icu_details.gender,
+  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, Age.age AS Age, icu_details.gender,
   CASE
     WHEN admission.insurance LIKE 'Government%' THEN 1
     WHEN admission.insurance LIKE 'Medicaid%' THEN 2
@@ -92,7 +92,7 @@ WITH dx AS -- sub-query diagnosed information about all admitted patient
   ON i_set.hadm_id = admission.hadm_id
 ), baseline_level_2 AS
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.label_hosp AS label_hosp, i_set.label_icu AS label_icu,
+  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
   lods.LODS AS lods, oasis.oasis AS oasis, sapsii.sapsii AS sapsii, sirs.sirs AS sirs, 
   CASE 
     WHEN sepsis3.sepsis3 IS NOT NULL THEN sepsis3.sepsis3
@@ -205,7 +205,7 @@ vasoactive_data as(
   ), Heart_Rate_raw AS   
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, i_set.outtime AS outtime, i_set.dod AS dod, h_p.value AS value, h_p.charttime AS charttime, 
-     DATETIME_DIFF(h_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, h_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, h_p.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, h_p.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(h_p.charttime, i_set.intime, HOUR) ORDER BY h_p.charttime ASC) AS icu_timestep_rank
+     DATETIME_DIFF(h_p.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, h_p.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, h_p.charttime, HOUR) AS hosp_timestep_back, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(h_p.charttime, i_set.intime, HOUR) ORDER BY h_p.charttime ASC) AS icu_timestep_rank, i_set.label_hosp AS label_hosp, i_set.label_icu AS label_icu
     FROM inclusion_set AS i_set
     LEFT JOIN Heart_Rate_part AS h_p
     ON i_set.subject_id = h_p.subject_id AND i_set.hadm_id = h_p.hadm_id AND i_set.stay_id = h_p.stay_id
@@ -570,7 +570,6 @@ Non_invasive_blood_pressure_sbp AS
   (
     SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime, sofa.sofa_24hours AS sofa, sofa.endtime AS charttime, 
     DATETIME_DIFF(sofa.starttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, sofa.starttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, sofa.starttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, sofa.starttime, HOUR) AS death_timestep, 
-  i_set.label_hosp AS label_hosp, i_set.label_icu AS label_icu, 
   RANK () OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(sofa.starttime, i_set.intime, HOUR) ORDER BY sofa.starttime ASC) AS icu_timestep_rank
     FROM inclusion_set AS i_set
     LEFT JOIN `physionet-data.mimiciv_derived.sofa` AS sofa
@@ -582,13 +581,18 @@ Non_invasive_blood_pressure_sbp AS
   ORDER BY Sofa_raw.stay_id, Sofa_raw.charttime
 ), Kdigo_creatinine AS 
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
-  kdigo_creatinine.charttime AS charttime, kdigo_creatinine.creat AS kdigo_creat, kdigo_creatinine.creat_low_past_48hr AS kdigo_past_48hr,
-  kdigo_creatinine.creat_low_past_7day AS kdigo_past_7day, DATETIME_DIFF(kdigo_creatinine.charttime, i_set.intime, day) AS charttime_diff
-  FROM inclusion_set AS i_set
-  LEFT JOIN `physionet-data.mimiciv_derived.kdigo_creatinine` AS kdigo_creatinine 
-  ON i_set.hadm_id = kdigo_creatinine.hadm_id AND i_set.stay_id = kdigo_creatinine.stay_id
-  ORDER BY i_set.subject_id, i_set.intime, kdigo_creatinine.charttime
+  WITH Kdigo_creatinine_raw AS
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,kdigo_creatinine.charttime AS charttime, kdigo_creatinine.creat AS kdigo_creat, DATETIME_DIFF(kdigo_creatinine.charttime, i_set.intime, HOUR) AS icu_timestep, DATETIME_DIFF(i_set.outtime, kdigo_creatinine.charttime, HOUR) AS icu_timestep_back, DATETIME_DIFF(i_set.dischtime, kdigo_creatinine.charttime, HOUR) AS hosp_timestep_back, DATETIME_DIFF(i_set.dod, kdigo_creatinine.charttime, HOUR) AS death_timestep, RANK() OVER (PARTITION BY i_set.stay_id, DATETIME_DIFF(kdigo_creatinine.charttime, i_set.intime, HOUR) ORDER BY kdigo_creatinine.charttime) AS icu_timestep_rank
+    FROM inclusion_set AS i_set
+    LEFT JOIN `physionet-data.mimiciv_derived.kdigo_creatinine` AS kdigo_creatinine 
+    ON i_set.hadm_id = kdigo_creatinine.hadm_id AND i_set.stay_id = kdigo_creatinine.stay_id
+    ORDER BY i_set.subject_id, i_set.intime, kdigo_creatinine.charttime
+  )
+  SELECT *
+  FROM Kdigo_creatinine_raw
+  WHERE Kdigo_creatinine_raw.icu_timestep_rank = 1
+  ORDER BY Kdigo_creatinine_raw.stay_id, Kdigo_creatinine_raw.charttime
 ), Kdigo_stage AS 
 (
   SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
@@ -599,13 +603,23 @@ Non_invasive_blood_pressure_sbp AS
   ORDER BY i_set.subject_id, i_set.intime, kdigo_stages.charttime
 ), Kdigo_uo AS  
 (
-  SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
-  kdigo_uo.charttime AS charttime, kdigo_uo.weight AS weight, kdigo_uo.urineoutput_6hr AS urineoutput_6hr, kdigo_uo.urineoutput_12hr AS urineoutput_12hr, kdigo_uo.urineoutput_24hr AS urineoutput_24hr, 
-  kdigo_uo.uo_rt_6hr AS uo_rt_6hr, kdigo_uo.uo_rt_12hr AS uo_rt_12hr, kdigo_uo.uo_rt_24hr AS uo_rt_24hr, kdigo_uo.uo_tm_6hr AS uo_tm_6hr, kdigo_uo.uo_tm_12hr AS uo_tm_12hr, kdigo_uo.uo_tm_24hr AS uo_tm_24hr, DATETIME_DIFF(kdigo_uo.charttime, i_set.intime, day) AS charttime_diff
-  FROM inclusion_set AS i_set
-  LEFT JOIN `physionet-data.mimiciv_derived.kdigo_uo` AS kdigo_uo
-  ON i_set.stay_id = kdigo_uo.stay_id
-  ORDER BY i_set.subject_id, i_set.intime, kdigo_uo.charttime
+  WITH Kdigo_uo_raw AS    
+  (
+    SELECT i_set.subject_id AS subject_id, i_set.hadm_id AS hadm_id, i_set.stay_id AS stay_id, i_set.intime AS intime,
+  kdigo_uo.charttime AS charttime, kdigo_uo.urineoutput_6hr AS urineoutput_6hr, kdigo_uo.urineoutput_12hr AS urineoutput_12hr, kdigo_uo.urineoutput_24hr AS urineoutput_24hr, 
+    kdigo_uo.uo_rt_6hr AS uo_rt_6hr, kdigo_uo.uo_rt_12hr AS uo_rt_12hr, kdigo_uo.uo_rt_24hr AS uo_rt_24hr, 
+    DATETIME_DIFF(kdigo_uo.charttime, i_set.intime, HOUR) - 24 AS icu_timestep, 
+    RANK() OVER (PARTITION BY i_set.stay_id, (DATETIME_DIFF(kdigo_uo.charttime, i_set.intime, HOUR) - 24) ORDER BY kdigo_uo.charttime) AS icu_timestep_rank
+    FROM inclusion_set AS i_set
+    LEFT JOIN `physionet-data.mimiciv_derived.kdigo_uo` AS kdigo_uo
+    ON i_set.stay_id = kdigo_uo.stay_id
+    ORDER BY i_set.subject_id, i_set.intime, kdigo_uo.charttime
+  )
+  SELECT *
+  FROM Kdigo_uo_raw
+  WHERE Kdigo_uo_raw.icu_timestep_rank = 1
+  ORDER BY Kdigo_uo_raw.stay_id, Kdigo_uo_raw.charttime
+  
 ), Combined_comorbidity_index AS   
 (
   SELECT *
@@ -614,13 +628,14 @@ Non_invasive_blood_pressure_sbp AS
   ON i_set.subject_id = charlson.subject_id AND i_set.hadm_id = charlson.hadm_id
 ), Apsiii AS   
 (
-  SELECT *
+  SELECT i_set.stay_id AS stay_id, apsiii.apsiii AS apsiii
   FROM inclusion_set AS i_set
   LEFT JOIN `physionet-data.mimiciv_derived.apsiii` AS apsiii
   ON i_set.subject_id = apsiii.subject_id AND i_set.hadm_id = apsiii.hadm_id AND i_set.stay_id = apsiii.stay_id
 ), vitalsign AS
 (
-  SELECT HR.subject_id AS subject_id, HR.hadm_id AS hadm_id, HR.stay_id AS stay_id, HR.icu_timestep AS icu_timestep, HR.icu_timestep_back AS icu_timestep_back, HR.hosp_timestep_back AS hosp_timestep_back, HR.death_timestep AS death_timestep,
+  SELECT HR.subject_id AS subject_id, HR.hadm_id AS hadm_id, HR.stay_id AS stay_id, HR.label_hosp AS label_hosp, HR.label_icu AS label_icu,
+  HR.icu_timestep AS icu_timestep, HR.icu_timestep_back AS icu_timestep_back, HR.hosp_timestep_back AS hosp_timestep_back, 
   HR.value AS Heart_rate, 
   CASE
     WHEN (NISBP.value IS NULL AND ASBP.value IS NOT NULL) THEN ASBP.value
@@ -639,7 +654,9 @@ Non_invasive_blood_pressure_sbp AS
   CASE
     WHEN (TC.value IS NULL AND TF.value IS NOT NULL) THEN (TF.value - 32) * 5 / 9
     ELSE TC.value
-  END AS tempture_C, sofa.sofa
+  END AS tempture_C, sofa.sofa, KC.kdigo_creat AS kdigo_creat, 
+  KU.urineoutput_6hr AS urineoutput_6hr, KU.urineoutput_12hr AS urineoutput_12hr, KU.urineoutput_24hr AS urineoutput_24hr,
+  KU.uo_rt_6hr AS uo_rt_6hr, KU.uo_rt_12hr AS uo_rt_12hr, KU.uo_rt_24hr AS uo_rt_24hr
   
   FROM Heart_Rate AS HR
   LEFT JOIN Non_invasive_blood_pressure_sbp AS NISBP ON HR.stay_id = NISBP.stay_id AND HR.icu_timestep = NISBP.icu_timestep
@@ -653,7 +670,156 @@ Non_invasive_blood_pressure_sbp AS
   LEFT JOIN Arterial_blood_pressure_dbp AS ADBP ON HR.stay_id = ADBP.stay_id AND HR.icu_timestep = ADBP.icu_timestep
   LEFT JOIN Arterial_blood_pressure_mbp AS AMBP ON HR.stay_id = AMBP.stay_id AND HR.icu_timestep = AMBP.icu_timestep
   LEFT JOIN Sofa AS sofa ON HR.stay_id = sofa.stay_id AND HR.icu_timestep = sofa.icu_timestep
+  LEFT JOIN Kdigo_creatinine AS KC ON HR.stay_id = KC.stay_id AND HR.icu_timestep = KC.icu_timestep
+  LEFT JOIN Kdigo_uo AS KU ON HR.stay_id = KU.stay_id AND HR.icu_timestep = KU.icu_timestep
   ORDER BY HR.stay_id, HR.charttime
+), Cancer_type AS
+(
+  SELECT i_set.hadm_id AS hadm_id, 
+  MAX(CASE
+    WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('140', '141', '142', '143', '144', '145', '146', '147', '148', '149') THEN 1
+    WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C00', 'C01', 'C02', 'C03', 'C04', 'C05', 'CO6', 'C07', 'C08', 'C09', 'C10', 'C11', 'C12', 'C13', 'C14') Then 1
+    ELSE 0
+  END) AS Head_and_Neck_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('150', '151', '152', '153', '154', '155', '156', '157', '158', '159') THEN 1
+      wHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26') THEN 1
+      ELSE 0
+    END
+  ) AS GI_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('160', '161', '162', '163', '164', '165') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C30', 'C31', 'C32', 'C33', 'C34', 'C35', 'C36', 'C37', 'C38', 'C39') THEN 1
+      ELSE 0
+    END
+  ) AS Respiratory_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('170', '171', '173') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C47', 'C48', 'C48') THEN 1
+      ELSE 0
+    END
+  ) AS Soft_Tissue_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('174', '175') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C50') THEN 1
+      ELSE 0
+    END
+  ) AS Breast_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('179', '180', '181', '182', '183', '184') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C51', 'C52', 'C53', 'C54', 'C55', 'C56', 'C57', 'C58') THEN 1
+      ELSE 0 
+    END
+  ) AS GYN_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('185') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C61') THEN 1
+      ELSE 0
+    END
+  ) AS Prostate_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('188', '189') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C64', 'C65', 'C66', 'C67', 'C68') THEN 1
+      ELSE 0
+    END
+  ) AS Urinary_Tract_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('191', '192') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C70', 'C71', 'C72') THEN 1
+      ELSE 0
+    END
+  ) AS CNS_Cancer, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('200', '201', '202') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C81', 'C82', 'C83', 'C84', 'C85', 'C86', 'C88') THEN 1
+      ELSE 0
+    END
+  ) AS Lymphoma, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('203') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C90') THEN 1
+      ELSE 0
+    END
+  ) AS Multiple_Myeloma, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('204', '205', '206', '207', '208') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C91', 'C92', 'C93', 'C94', 'C95') THEN 1
+      ELSE 0
+    END
+  ) AS Leukemia, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('209') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C7A') THEN 1
+      ELSE 0
+    END
+  ) AS Neuroendocrine_Tumors, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('196') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C77') THEN 1
+      ELSE 0
+    END
+  ) AS Lymph_Node_Metastases, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('1970', '1971', '1972', '1973') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C780', 'C781', 'C782', 'C783') THEN 1
+      ELSE 0
+    END
+  ) AS Respiratory_and_Intrathoracic_Organ_Metastases, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('1985') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C795') THEN 1
+      ELSE 0
+    END
+  ) AS Bone_Metastases, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('1974', '1975', '1976', '1977', '1978') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C784', 'C785', 'C786', 'C787', 'C788') THEN 1
+      ELSE 0
+    END
+  ) AS GI_Metastases, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('1983', '1984') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C793') THEN 1
+      ELSE 0
+    END
+  ) AS Brain_and_Central_Nervous_System_Metastases, 
+  MAX(
+    CASE
+      WHEN dx.icd_version = 9 AND LEFT(dx.icd_code, 3) in ('1986', '1987', '19882', '19889', '1990') THEN 1
+      WHEN dx.icd_version = 10 AND LEFT(dx.icd_code, 3) in ('C796', 'C797', 'C798', 'C799', 'C800') THEN 1
+      ELSE 0
+    END
+  ) AS Soft_tissue_Metastases
+
+  FROM inclusion_set AS i_set
+  LEFT JOIN dx AS dx ON i_set.subject_id = dx.subject_id AND i_set.hadm_id = dx.hadm_id
+  GROUP BY i_set.hadm_id
+), baseline AS
+(
+  SELECT *
+  FROM inclusion_set AS i_set
+  LEFT JOIN baseline_level_1 AS b1 ON i_set.stay_id = b1.stay_id
+  LEFT JOIN baseline_level_2 AS b2 ON i_set.stay_id = b2.stay_id
+  LEFT JOIN Combined_comorbidity_index AS CCI ON i_set.stay_id = CCI.stay_id
+  LEFT JOIN Apsiii AS apsiii ON i_set.stay_id = apsiii.stay_id
+  LEFT JOIN Cancer_type AS CT ON i_set.hadm_id = CT.hadm_id
 )
 
 -- SELECT COUNT (DISTINCT subject_id)
