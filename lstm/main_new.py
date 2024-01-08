@@ -533,9 +533,11 @@ def test(opt):
 
 
     # Read the data
-    data_X = np.load(os.path.join(opt.data_dir, 'data_X_final.npy'))
-    data_y = np.load(os.path.join(opt.data_dir, 'data_y_final.npy'))
+    # data_X = np.load(os.path.join(opt.data_dir, 'data_X_final.npy'))
+    # data_y = np.load(os.path.join(opt.data_dir, 'data_y_final.npy'))
     
+    data_X = np.load(os.path.join(opt.data_dir, 'data_X_final_test.npy'))
+    data_y = np.load(os.path.join(opt.data_dir, 'data_y_final_test.npy'))
 
     # Load the model
     output_sizes = [1, 1, 1, 1, 1, 1] # size of each output branch
@@ -567,8 +569,8 @@ def test(opt):
     
     # save the predictions output as .csv file
     if opt.save_results:
-        result = np.concatenate((data_y[:, 0:1], test_data['gt'][:, 1:3], test_data['pred'][:, 0:2], test_data['pred'][:, -2:]), axis=1)
-        columns_label = ['stay_id', 'label_hosp_gt', 'label_icu_gt', 'label_hosp', 'label_icu', 'label_24hr_die', 'label_24hr_alive']
+        result = np.concatenate((data_y[:, 0:1], test_data['gt'][:, 1:3], test_data['gt'][:, 5:7], test_data['pred'][:, 0:2], test_data['pred'][:, -2:]), axis=1)
+        columns_label = ['stay_id', 'label_hosp_gt', 'label_icu_gt', 'die_24_gt', 'alive_24_gt', 'label_hosp', 'label_icu', 'die_24', 'alive_24']
         df = pd.DataFrame(result, columns=columns_label)
         df.to_csv(os.path.join(exp_dir, 'result.csv'), index=False)
 

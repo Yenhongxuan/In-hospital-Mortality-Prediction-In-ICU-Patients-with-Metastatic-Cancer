@@ -16,11 +16,10 @@ def data_preprocessing(opt):
     df_b = pd.read_csv(opt.r_b)
     df_v = pd.read_csv(opt.r_v)
 
-
-    label_name = 'label_' + opt.type
-    label_name_b = 'label_' + opt.type + '_baseline'
-    label_name_v = 'label_' + opt.type + '_vitalsign'
-    label_name_gt = 'label_' + opt.type + '_gt'
+    label_name = opt.type
+    label_name_b = opt.type + '_baseline'
+    label_name_v = opt.type + '_vitalsign'
+    label_name_gt = opt.type + '_gt'
     df_v = df_v[['stay_id', label_name, label_name_gt]]
     df_b = df_b[['stay_id', label_name]]
 
@@ -31,9 +30,24 @@ def data_preprocessing(opt):
     df = pd.merge(df_b, df_v, on='stay_id', how='inner')
     
 
-    data_X = df[[label_name_b, label_name_v]].values
-    data_y = df[[label_name_gt, 'stay_id']].values
-    return data_X, data_y 
+    if opt.test:
+        test_set_df = pd.read_csv(opt.test_set)
+        train_df = df[~df['stay_id'].isin(test_set_df['stay_id'])]
+        test_df = df[df['stay_id'].isin(test_set_df['stay_id'])]
+
+        data_X_train = train_df[[label_name_b, label_name_v]].values
+        data_y_train = train_df[[label_name_gt, 'stay_id']].values
+
+        data_X_test = test_df[[label_name_b, label_name_v]].values
+        data_y_test = test_df[[label_name_gt, 'stay_id']].values
+
+        return data_X_train, data_y_train, data_X_test, data_y_test
+    else:
+        data_X = df[[label_name_b, label_name_v]].values
+        data_y = df[[label_name_gt, 'stay_id']].values
+
+        return data_X, data_y, data_X, data_y
+
 
 def plot_summary(y_true, y_pred, exp_dir):
     # plot the confusion matrix
@@ -92,8 +106,10 @@ def plot_summary(y_true, y_pred, exp_dir):
 # arguments for stacking SVM
 def opt_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--r_b', type=str, default='./data/xg_boost_pred.csv', help='result of baseline') # predicted results from Xgboost
+    parser.add_argument('--r_b', type=str, default='./data/xg_boost_pred_48.csv', help='result of baseline') # predicted results from Xgboost
     parser.add_argument('--r_v', type=str, default='./data/lstm_pred.csv', help='result of vitalsign') # predicted results from LSTM
+    parser.add_argument('--test_set', type=str, default='./data/test.csv')
+    parser.add_argument('--test', action='store_true')
     parser.add_argument('--type', type=str, default='all', help='type of prediction label')
     parser.add_argument('--output_dir', type=str, default='./output')
     parser.add_argument('--save_results', action='store_true', help='Whether to save the results')
@@ -103,7 +119,7 @@ def opt_parser():
 
 def main(opt):
 
-    types = ['hosp', 'icu']
+    types = ['label_hosp', 'label_icu', 'die_24', 'alive_24']
 
     # create the output directory
     os.makedirs(opt.output_dir, exist_ok=True)
@@ -119,33 +135,36 @@ def main(opt):
 
             opt.type = type
 
-            data_X, data_y = data_preprocessing(opt)
+            data_X, data_y, data_X_test, data_y_test = data_preprocessing(opt)
+
+            cprint('Shape of train: {}'.format(data_X.shape))
+            cprint('Shape of test: {}'.format(data_X_test.shape))
 
             clf = SVC(probability=True)
             clf.fit(data_X, data_y[:, 0])
 
-            y_pred = clf.predict_proba(data_X)[:, 1]
+            y_pred = clf.predict_proba(data_X_test)[:, 1]
 
-            plot_summary(data_y[:, 0], y_pred, exp_dir)
+            plot_summary(data_y_test[:, 0], y_pred, exp_dir)
             
             if opt.save_results:
-                result_df['label_{}_gt'.format(type)] = data_y[:, 0]
-                result_df['label_{}'.format(type)] = y_pred
-                result_df['stay_id'] = data_y[:, 1]
+                result_df['{}_gt'.format(type)] = data_y_test[:, 0]
+                result_df['{}'.format(type)] = y_pred
+                result_df['stay_id'] = data_y_test[:, 1]
     elif opt.type in types:
-        data_X, data_y = data_preprocessing(opt)
+        data_X, data_y, data_X_test, data_y_test = data_preprocessing(opt)
             
         clf = SVC(probability=True)
         clf.fit(data_X, data_y[:, 0])
 
-        y_pred = clf.predict_proba(data_X)[:, 1]
+        y_pred = clf.predict_proba(data_X_test)[:, 1]
 
-        plot_summary(data_y[:, 0], y_pred, exp_dir)
+        plot_summary(data_y_test[:, 0], y_pred, exp_dir)
         
         if opt.save_results:
-            result_df['label_{}_gt'.format(type)] = data_y[:, 0]
-            result_df['label_{}'.format(type)] = y_pred
-            result_df['stay_id'] = data_y[:, 1]
+            result_df['{}_gt'.format(type)] = data_y_test[:, 0]
+            result_df['{}'.format(type)] = y_pred
+            result_df['stay_id'] = data_y_test[:, 1]
     else:
         raise Exception('Wrong type for input data of stacking SVM')
 
