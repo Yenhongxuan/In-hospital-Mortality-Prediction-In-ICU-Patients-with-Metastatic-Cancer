@@ -820,11 +820,253 @@ Non_invasive_blood_pressure_sbp AS
   LEFT JOIN Combined_comorbidity_index AS CCI ON i_set.stay_id = CCI.stay_id
   LEFT JOIN Apsiii AS apsiii ON i_set.stay_id = apsiii.stay_id
   LEFT JOIN Cancer_type AS CT ON i_set.hadm_id = CT.hadm_id
+),
+
+
+-- measurements
+bg_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, hadm_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.bg` as data
+  on i_set.hadm_id = data.hadm_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+first_day_lab_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_lab` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+blood_differential_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.blood_differential` as data
+  on i_set.hadm_id = data.hadm_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+cardiac_marker_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.cardiac_marker` as data
+  on i_set.hadm_id = data.hadm_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+chemistry_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.chemistry` as data
+  on i_set.hadm_id = data.hadm_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+coagulation_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.coagulation` as data
+  on i_set.hadm_id = data.hadm_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+complete_blood_count_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.complete_blood_count` as data
+  on i_set.hadm_id = data.hadm_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+creatinine_baseline_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.creatinine_baseline` as data
+  on i_set.hadm_id = data.hadm_id
+),
+gcs_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.gcs` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+height_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.height` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+icp_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.icp` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+  WHERE data.subject_id is not null
+),
+
+inflammation_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.crp, RANK() OVER (PARTITION BY i_set.stay_id ORDER BY data.charttime ASC) AS rank
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.inflammation` as data
+  on i_set.hadm_id = data.hadm_id and i_set.subject_id = data.subject_id
+ -- WHERE data.subject_id is not null
+),
+
+oxygen_delivery_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.o2_delivery_device_1, RANK() OVER (PARTITION BY i_set.stay_id ORDER BY data.charttime ASC) AS rank
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.oxygen_delivery` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+ 
+),
+
+rhythm_data as(
+  SELECT i_set.subject_id, data.* EXCEPT (subject_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.rhythm` as data
+  on i_set.subject_id = data.subject_id
+
+),
+
+urine_output_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (stay_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.urine_output` as data
+  on i_set.stay_id = data.stay_id
+),
+
+urine_output_rate_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (stay_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.urine_output_rate` as data
+  on i_set.stay_id = data.stay_id
+),
+ventilator_setting_data as(
+  SELECT i_set.subject_id, i_set.stay_id , (case when data.charttime is not null then 1 else 0 end) as ventilator_label ,
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.ventilator_setting` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+vital_sign_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) , i_set.label_hosp, label_icu , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.vitalsign` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+-- first day ---------------------------------------------------------------
+
+first_day_bg_data as( --all
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id)  
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_bg` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+-- first_day_bg_art_data as(
+--   SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) , i_set.label_hosp, label_icu , 
+--   FROM inclusion_set AS i_set
+--   LEFT JOIN `physionet-data.mimiciv_derived.first_day_bg_art` as data
+--   on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+-- ),
+
+first_day_gcs_data as( --only gcs_min
+  SELECT i_set.subject_id, i_set.stay_id , data.gcs_min
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_gcs` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+first_day_height_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id)
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_height` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+first_day_rrt_data as(
+  SELECT i_set.subject_id, i_set.stay_id , (case when dialysis_present is not null then 1 else 0 end) as dialysis_present , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_rrt` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+first_day_sofa_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) ,
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_sofa` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+first_day_urine_output_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) ,
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_urine_output` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+first_day_vitalsign_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) , 
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_vitalsign` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+first_day_weight_data as(
+  SELECT i_set.subject_id, i_set.stay_id , data.* EXCEPT (subject_id, stay_id) ,
+  FROM inclusion_set AS i_set
+  LEFT JOIN `physionet-data.mimiciv_derived.first_day_weight` as data
+  on i_set.stay_id = data.stay_id and i_set.subject_id = data.subject_id
+
+),
+
+first_day_data as (
+  SELECT 
+  bg.*, 
+  gcs.* except(stay_id, subject_id), 
+  rrt.* except(stay_id, subject_id), 
+  sofa.* except(stay_id, subject_id), 
+  urine_output.* except(stay_id, subject_id), 
+  weight.* except(stay_id, subject_id), 
+  height.* except(stay_id, subject_id)
+
+  FROM first_day_bg_data as bg
+
+  LEFT JOIN first_day_gcs_data as gcs
+  on bg.subject_id = gcs.subject_id and bg.stay_id = gcs.stay_id
+
+  LEFT JOIN first_day_height_data as height
+  ON bg.subject_id = height.subject_id and bg.stay_id = height.stay_id
+
+  LEFT JOIN first_day_rrt_data as rrt
+  ON bg.subject_id = rrt.subject_id and bg.stay_id = rrt.stay_id
+
+  LEFT JOIN first_day_sofa_data as sofa
+  ON bg.subject_id = sofa.subject_id and bg.stay_id = sofa.stay_id
+
+  LEFT JOIN first_day_urine_output_data as urine_output
+  ON bg.subject_id = urine_output.subject_id and bg.stay_id = urine_output.stay_id
+
+  LEFT JOIN first_day_weight_data as weight
+  ON bg.subject_id = weight.subject_id and bg.stay_id = weight.stay_id
 )
 
--- SELECT COUNT (DISTINCT subject_id)
-SELECT *
-FROM vitalsign
-
-
-
+-- SELECT COUNT (DISTINCT (stay_id))
+SELECT DISTINCT* 
+From rhythm_data
+-- where rank = 1
